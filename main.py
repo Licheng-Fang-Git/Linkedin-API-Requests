@@ -1,60 +1,53 @@
-# streamlit_tfidf_similarity.py
-import streamlit as st
+import requests
+import json
+from urllib.parse import quote
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
+from datetime import datetime
+import streamlit as st
 
-# Sidebar option
-st.sidebar.title("Analysis Options")
-analysis_option = st.sidebar.selectbox("Choose an analysis", ["Overview", "TF-IDF Similarity Clustering"])
+org_id = "1524030"
+access_token = "AQV5pi5X2CBPhSGGSxzBHuVHcu6__kjAHQqSGM1K0sQs1hBfg_5cW3jTPHf0px9iBDX_kPp-AqQGK8BoCKASNYWc3lAd0mJfouKA8IzT3ux265k9yjHBNlQ4WJhW1Qr5zFGBHMpGloXFsQuok1yQa_i3s5EvMW9rM4_jyy4Zq_Urynn9eyoke7BCuq0qWKWR5AvSC0tD0j4EXrJMrkXWfwV0aC4mQdTXuuGnynAarkuNnE086imJC_hj8qxeda-6o_YeB8r6qq0873kHswXwxNta3cUNje0HhCIw3fUSupYR92kRFvY0Jxr24pcvKqrQHJbNXvRP_VUenjHS3HVTVqGnelkcJg"  # Replace with yours
+org_urn = f"urn:li:organization:{org_id}"
+org_urn_encoded = quote(org_urn)
 
-# Load data
-@st.cache_data
-def load_data():
-    sheet_id = '1thMQ4ndtgzyEM6qfoA2tfrt3MEzZY2CtxhjpCTNcS0U'  # Example: '1mSEJtzy5L0nuIMRlY9rYdC5s899Ptu2gdMJcIalr5pg'
-    content_sheet_name = 'Content'
-    content_csv_url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={content_sheet_name}'
-    return pd.read_csv(content_csv_url)  # Change this path as needed
+headers = {
+    "Authorization": f"Bearer {access_token}",
+    "X-Restli-Protocol-Version": "2.0.0",
+    "LinkedIn-Version": "202507",
+    "Content-Type": "application/json"
+}
 
-df = load_data()
+# Get total number of Impressions
+# url = f"https://api.linkedin.com/rest/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity={org_urn_encoded}"
 
-if analysis_option == "Overvie w":
-    st.title("LinkedIn Content Overview")
-    st.write(df.head())
+# Time start to End and the impressions each day
+url = f'https://api.linkedin.com/rest/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity=urn%3Ali%3Aorganization%3A1524030&timeIntervals=(timeRange:(start:1751328000000,end:1753833600000),timeGranularityType:DAY)'
 
-elif analysis_option == "TF-IDF Similarity Clustering":
-    st.title("Detect Similar Posts Using TF-IDF")
 
-    # Ensure 'Content' column exists
-    if "Post title" not in df.columns:
-        st.error("No 'Post title' column found in dataset.")
-    else:
-        # Fill NaNs with blanks for text processing
-        contents = df['Post title'].fillna("")
 
-        # Compute TF-IDF
-        vectorizer = TfidfVectorizer(stop_words='english')
-        tfidf_matrix = vectorizer.fit_transform(contents)
+response = requests.get(url, headers=headers)
 
-        # Compute cosine similarity
-        cos_sim = cosine_similarity(tfidf_matrix)
+if response.status_code == 200:
+    print("No errors")
+else:
+    print(f"Error: {response.status_code} - {response.text}")
 
-        # Flag similar pairs above threshold
-        threshold = 0.9
-        similar_pairs = np.argwhere((cos_sim > threshold) & (cos_sim < 1.0))
-        similar_df = pd.DataFrame(similar_pairs, columns=['Post A', 'Post B'])
+daily_stats = []
+for entry in response.json()['elements']:
+    date = datetime.utcfromtimestamp(entry["timeRange"]["start"] / 1000).strftime('%Y-%m-%d')
+    stats = entry["totalShareStatistics"]
+    daily_stats.append({
+        "Date": date,
+        "Unique Impressions": stats["uniqueImpressionsCount"],
+        "Total Impressions": stats["impressionCount"],
+        "Clicks": stats["clickCount"],
+        "Likes": stats["likeCount"],
+        "Comments": stats["commentCount"],
+        "Shares": stats["shareCount"],
+        "Engagement Rate": stats["engagement"]
+    })
 
-        # Drop duplicates (e.g. (1,2) and (2,1))
-        similar_df = similar_df[similar_df['Post A'] < similar_df['Post B']]
-
-        st.subheader(f"Posts with Similarity > {threshold}")
-        st.write(similar_df)
-        print(df.iloc[68]['Year'])
-        # Optionally show the actual text
-        for _, row in similar_df.head(5).iterrows():
-            idx_a = row['Post A']
-            idx_b = row['Post B']
-            st.markdown(f"**Pair {idx_a} & {idx_b}:**")
-            st.text(f"Post A: {contents.iloc[idx_a][:300]}...")
-            st.text(f"Post B: {contents.iloc[idx_b][:300]}...")
+# Create DataFrame
+daily_df = pd.DataFrame(daily_stats)
+print(daily_df)
+st.dataframe(daily_df)
